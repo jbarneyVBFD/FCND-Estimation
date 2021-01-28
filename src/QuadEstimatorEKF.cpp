@@ -93,60 +93,19 @@ void QuadEstimatorEKF::UpdateFromIMU(V3F accel, V3F gyro)
   // (replace the code below)
   // make sure you comment it out when you add your own code -- otherwise e.g. you might integrate yaw twice
 
-/*
-  // \/\/\/\/\/ SOLUTION USING DIEBEL PAPER \/\/\/\/\/\/
-       // Doesn't pass the GPS scenario
-
-  //Diebel 84
-  float phi = rollEst / 2.f;
-  float theta = pitchEst / 2.f;
-  float psi = ekfState(6) / 2.f;
-
-  float q0 = cos(phi) * cos(theta) * cos(psi) + sin(phi) * sin(theta) * sin(psi);
-  float q1 = -cos(phi) * sin(theta) * sin(psi) + cos(theta) * cos(psi) * sin(phi);
-  float q2 = cos(phi) * cos(psi) * sin(theta) + sin(phi) * cos(theta) * sin(psi);
-  float q3 = cos(phi) * cos(theta) * sin(psi) - sin(phi) * cos(psi) * sin(theta);
-
-  gyro = gyro * dtIMU / 2.0;
-
-  float dq0 = cos(gyro.x) * cos(gyro.y) * cos(gyro.z) + sin(gyro.x) * sin(gyro.y) * sin(gyro.z);
-  float dq1 = -cos(gyro.x) * sin(gyro.y) * sin(gyro.z) + cos(gyro.y) * cos(gyro.z) * sin(gyro.x);
-  float dq2 = cos(gyro.x) * cos(gyro.z) * sin(gyro.y) + sin(gyro.x) * cos(gyro.y) * sin(gyro.z);
-  float dq3 = cos(gyro.x) * cos(gyro.y) * sin(gyro.z) - sin(gyro.x) * cos(gyro.z) * sin(gyro.y);
-
-  //Diebel 102
-
-  float qdot0 = q0*dq0 - q1*dq1 - q2*dq2 - q3*dq3;
-  float qdot1 = q1*dq0 + q0*dq1 + q3*dq2 - q2*dq3;
-  float qdot2 = q2*dq0 - q3*dq1 + q0*dq2 + q1*dq3;
-  float qdot3 = q3*dq0 + q2*dq1 - q1*dq2 + q0*dq3;
-
-  //Diebel 73
-
-  float predictedRoll = atan2(2 * (qdot2 * qdot3 + qdot0 * qdot1), qdot3*qdot3 - qdot2*qdot2 - qdot1*qdot1 + qdot0*qdot0);
-
-  float predictedPitch = -asin(2 * (qdot1 * qdot3 - qdot0 * qdot2));
-
-  ekfState(6) = atan2(2 * (qdot1 * qdot2 + qdot0 *qdot3), qdot1*qdot1 + qdot0*qdot0 - qdot3*qdot3 - qdot2*qdot2);
-
-  if (ekfState(6) > F_PI){
-      ekfState(6) -= 2.0 * F_PI;
-  }
-  else if (ekfState(6) < -F_PI){
-      ekfState(6) += 2.0 * F_PI;
-  }
-
-*/
-
 
 
   // \/\/\/\/\/ SOLUTION USING QUATERNION.H \/\/\/\/\/\/
 
   Quaternion<float> qt;
 
+  //Diebel eq 84
   qt = qt.FromEuler123_RPY(rollEst, pitchEst, ekfState(6));
+
+  // uses FromAxisAngle(Diebel eq 175) and overloaded * operater (Diebel 102)
   qt = qt.IntegrateBodyRate(gyro, dtIMU);
 
+  // Diebel 290
   float predictedRoll = qt.Roll();
   float predictedPitch = qt.Pitch();
   ekfState(6) = qt.Yaw();
@@ -157,12 +116,13 @@ void QuadEstimatorEKF::UpdateFromIMU(V3F accel, V3F gyro)
   float predictedPitch = pitchEst + dtIMU * gyro.y;
   float predictedRoll = rollEst + dtIMU * gyro.x;
   ekfState(6) = ekfState(6) + dtIMU * gyro.z;	// yaw
+*/
 
-
+  // keeping given yaw normalization
   // normalize yaw to -pi .. pi
   if (ekfState(6) > F_PI) ekfState(6) -= 2.f*F_PI;
   if (ekfState(6) < -F_PI) ekfState(6) += 2.f*F_PI;
-*/
+
 
 
   /////////////////////////////// END STUDENT CODE ////////////////////////////
@@ -226,8 +186,10 @@ VectorXf QuadEstimatorEKF::PredictState(VectorXf curState, float dt, V3F accel, 
 
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
+  // rotate accel to world frame that attitude is in
   V3F aI = attitude.Rotate_BtoI(accel);
 
+  // Tellex equation 49
   predictedState(0) += predictedState(3)*dt;
   predictedState(1) += predictedState(4)*dt;
   predictedState(2) += predictedState(5)*dt;
@@ -261,10 +223,12 @@ MatrixXf QuadEstimatorEKF::GetRbgPrime(float roll, float pitch, float yaw)
 
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
+  // use phi, theta, yaw for ease of copying
   float phi = roll;
   float theta = pitch;
   float psi = yaw;
 
+  // Diebel 71
   RbgPrime << -cos(theta)*sin(psi), -sin(phi)*sin(theta)*sin(psi) - cos(phi)*cos(psi), -cos(phi)*sin(theta)*sin(psi) + sin(phi)*cos(psi),
               cos(theta)*cos(psi), sin(phi)*sin(theta)*cos(psi) - cos(phi)*sin(psi), cos(phi)*sin(theta)*cos(psi) + sin(phi)*sin(psi),
               0.0, 0.0, 0.0;
@@ -316,12 +280,13 @@ void QuadEstimatorEKF::Predict(float dt, V3F accel, V3F gyro)
 
   MatrixXf ut(3, 1);
 
+  // accelerometer readings used as control inputs
   ut << accel.x,
         accel.y,
         accel.z;
 
 
-
+  // Tellex eq 51
   gPrime << 1.0, 0.0, 0.0, dt, 0.0, 0.0, 0.0,
             0.0, 1.0, 0.0, 0.0, dt, 0.0, 0.0,
             0.0, 0.0, 1.0, 0.0, 0.0, dt, 0.0,
@@ -331,7 +296,7 @@ void QuadEstimatorEKF::Predict(float dt, V3F accel, V3F gyro)
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0;
 
 
-
+  // found on page 3 of Tellex in EKF algorithm predict step
   ekfCov << gPrime * ekfCov * gPrime.transpose() + Q;
 
 
@@ -360,6 +325,7 @@ void QuadEstimatorEKF::UpdateFromGPS(V3F pos, V3F vel)
   //  - this is a very simple update
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
+  // Tellex eq 55
   hPrime <<  1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
              0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
              0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
@@ -367,6 +333,7 @@ void QuadEstimatorEKF::UpdateFromGPS(V3F pos, V3F vel)
              0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
              0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0;
 
+  // Tellex eq 54
   zFromX << ekfState(0), ekfState(1), ekfState(2), ekfState(3), ekfState(4), ekfState(5);
 
   /////////////////////////////// END STUDENT CODE ////////////////////////////
@@ -390,16 +357,22 @@ void QuadEstimatorEKF::UpdateFromMag(float magYaw)
   //  - The magnetomer measurement covariance is available in member variable R_Mag
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
-
+  // Tellex eq 58
   hPrime << 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0;
+
+  // Tellex eq 57
   zFromX << ekfState(6);
 
+
+  // Residual that will be computed in call to Update below
   float y = magYaw - ekfState(6);
+
+  // normalizing residual to keep from updating the long way around
   if (y > F_PI){
-      zFromX(0) += 2.0 * F_PI;
+      zFromX(0) += 2.0 * F_PI; // move counterclockwise
   }
   else if (y < -F_PI){
-      zFromX(0) -= 2.0 * F_PI;
+      zFromX(0) -= 2.0 * F_PI; // move clockwise
   }
 
   /////////////////////////////// END STUDENT CODE ////////////////////////////
