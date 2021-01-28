@@ -25,7 +25,7 @@ Quaternion<float> qt;
 ```cpp
 qt = qt.FromEuler123_RPY(rollEst, pitchEst, ekfState(6));
 ```
-- FromEuler123_RPY uses the following function numbered 84 from James Diebel's, Representing Attitude paper [1] for converting euler angles into a quaternions. With c and s 
+- FromEuler123_RPY uses the following function numbered 84 from James Diebel's, Representing Attitude paper [1] for converting euler angles into quaternions. With c and s 
 representing cosine and sine.
 
 
@@ -42,7 +42,7 @@ representing cosine and sine.
     T q2 = cos(roll) * cos(yaw)   * sin(pitch) + sin(roll)  * cos(pitch) * sin(yaw);
     T q3 = cos(roll) * cos(pitch) * sin(yaw)   - sin(roll)  * cos(yaw)   * sin(pitch);
 ```
-- With the given current estimate converted into a quaternion, I was able to use the inline IntegrateBodyRate funciton to integrate the body rate from the gyro sensor.
+- With the given current estimate converted into a quaternion, I was able to use the Quaternion class's IntegrateBodyRate funciton to integrate the body rate from the gyro sensor.
 ```cpp
 inline Quaternion IntegrateBodyRate(const V3D pqr, const double dt) //body rates must be expressed in the body coordinate frame!
   {
@@ -165,19 +165,19 @@ as the input accelerations, having already been rotated to the world frame above
 
 
 
-- Moving onto the function GetRbgPrime, I first created phi, theta, and psi variables, with roll, pitch, and yaw passed into them to make it easier to copy equation 71 from Diebel [1]. I then used the comma initializer from Eigen and passed in all the coeffefficients from Diebels equation.
+- Moving onto the function GetRbgPrime, I first created phi, theta, and psi variables, with roll, pitch, and yaw passed into them to make it easier to copy equation 71 from Diebel [1]. I then used the comma initializer from the Eigen library and passed in all the coefficients from Diebels equation.
 
 ```cpp
 float phi = roll;
-  float theta = pitch;
-  float psi = yaw;
+float theta = pitch;
+float psi = yaw;
 
-  RbgPrime << -cos(theta)*sin(psi), -sin(phi)*sin(theta)*sin(psi) - cos(phi)*cos(psi), -cos(phi)*sin(theta)*sin(psi) + sin(phi)*cos(psi),
-              cos(theta)*cos(psi), sin(phi)*sin(theta)*cos(psi) - cos(phi)*sin(psi), cos(phi)*sin(theta)*cos(psi) + sin(phi)*sin(psi),
-              0.0, 0.0, 0.0;
+RbgPrime << -cos(theta)*sin(psi), -sin(phi)*sin(theta)*sin(psi) - cos(phi)*cos(psi), -cos(phi)*sin(theta)*sin(psi) + sin(phi)*cos(psi),
+            cos(theta)*cos(psi), sin(phi)*sin(theta)*cos(psi) - cos(phi)*sin(psi), cos(phi)*sin(theta)*cos(psi) + sin(phi)*sin(psi),
+            0.0, 0.0, 0.0;
 ```
 
-For the Predict function I first initialized ut as a MatrixXf from Eigen, and used the comma initializer to pass in the accelerometer's readings. I again used the comma initializer to pass in the jacobian of the above <a href="https://www.codecogs.com/eqnedit.php?latex=\inline&space;g(x_t,&space;u_t,&space;\Delta_t)" target="_blank"><img src="https://latex.codecogs.com/gif.latex?\inline&space;g(x_t,&space;u_t,&space;\Delta_t)" title="g(x_t, u_t, \Delta_t)" /></a> as defined in equation 51 from Tellex's estimation paper [2]. From there I followed the extended kalman filter algorithm on page 3 of Tellex's estimation paper [2], written below, to compute the predicted state variance.
+For the Predict function I first initialized ut as a MatrixXf from the Eigen library, and used the comma initializer to pass in the accelerometer's readings. I again used the comma initializer to pass in the jacobian of the above <a href="https://www.codecogs.com/eqnedit.php?latex=\inline&space;g(x_t,&space;u_t,&space;\Delta_t)" target="_blank"><img src="https://latex.codecogs.com/gif.latex?\inline&space;g(x_t,&space;u_t,&space;\Delta_t)" title="g(x_t, u_t, \Delta_t)" /></a> as defined in equation 51 from Tellex's estimation paper [2]. From there I followed the extended kalman filter algorithm on page 3 of Tellex's estimation paper [2], written below, to compute the predicted state variance.
 
 
 
@@ -213,27 +213,48 @@ MatrixXf ut(3, 1);
 
 ### Step 4
 
-- For the UpdateFromMag function I first used the comma initializer from the Eigen library to pass in the values for hPrime as it is in equation 58 from Tellex's estimation paper [2]. I then passed in the current estimated yaw to the zFromX vector. Then I created the float y, to pass in the difference of the measured and estimated yaw. From there I normalised the difference to keep the movements as short as possible. This was normalised by preventing the difference from being greater than pi radians (180 degrees). If it were found to be greater than pi radians (180 degrees), 2 pi was added to the estimated yaw, sending it in the opposite (counter-clockwise) direction. Conversely if the difference was found to be less than -pi (-180 degrees), then 2 pi was subtracted from the estimated yaw, again sending it in the opposite (clockwise) direction.   
+- In the file QuadEstimatorEKF.txt I tuned the QYawStd to .1 to approximately capture the magnitude of the drift I observed when running scenario 10.
+
+- For the UpdateFromMag function I first used the comma initializer from the Eigen library to pass in the values for hPrime as it is in equation 58 from Tellex's estimation paper [2]. I then passed in the current estimated yaw to the zFromX vector. Then I created the float y, to pass in the difference of the measured and estimated yaw. From there I normalised the difference to keep the movements as short as possible when this residual is computed in the call to Update with the following equation from the EKF algorithm on page 3 of Tellex's estimation paper [2]. <a href="https://www.codecogs.com/eqnedit.php?latex=\inline&space;\mu_t&space;=&space;\bar{\mu}_t&space;&plus;&space;K_t(z_t&space;-&space;h(\bar{\mu_t}))" target="_blank"><img src="https://latex.codecogs.com/gif.latex?\inline&space;\mu_t&space;=&space;\bar{\mu}_t&space;&plus;&space;K_t(z_t&space;-&space;h(\bar{\mu_t}))" title="\mu_t = \bar{\mu}_t + K_t(z_t - h(\bar{\mu_t}))" /></a> This was normalised by preventing the residual from being greater than pi radians (180 degrees). If it were found to be greater than pi radians (180 degrees), 2 pi (360 degrees) was added to the estimated yaw, sending it in the opposite (counter-clockwise) direction. Conversely if the difference was found to be less than -pi (-180 degrees), then 2 pi (360 degrees) was subtracted from the estimated yaw, again sending it in the opposite (clockwise) direction.   
 
 ```cpp
 hPrime << 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0;
-  zFromX << ekfState(6);
+zFromX << ekfState(6);
 
-  float y = magYaw - ekfState(6);
-  if (y > F_PI){
-      zFromX(0) += 2.0 * F_PI;
-  }
-  else if (y < -F_PI){
-      zFromX(0) -= 2.0 * F_PI;
-  }
-  ```
+float y = magYaw - ekfState(6);
+if (y > F_PI){
+    zFromX(0) += 2.0 * F_PI;
+}
+else if (y < -F_PI){
+    zFromX(0) -= 2.0 * F_PI;
+}
+```
   
-  ### Step 5
+### Step 5
   
-  
-  
-  
+- In the file QuadEstimatorEKF.txt I tuned the QPosXYStd and QPosZStd both to .05 to approximately capture the magnitude of the drift I observed when running scenario 11. I also tuned the velocities for x, y, and z to .1, for the drift I observed there.
 
+- I again used the Eigen library's comma initializer to pass in the values needed for hPrime as defined in equation 55 in Tellex's estimation paper [2]. I also used the Eigen library's comma initializer to pass in the values needed for zFromX as defined in equation 54 in Tellex's estimation paper [2]. 
+
+```cpp
+hPrime <<  1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+           0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+           0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
+           0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+           0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+           0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0;
+
+zFromX << ekfState(0), ekfState(1), ekfState(2), ekfState(3), ekfState(4), ekfState(5);
+```
+
+### Step 6
+
+- In this step I simply replaced the given controller with the controller I created in the controls project earlier. I did the same for the QuadControlParams.txt file. Even though it still passed all of the scenarios, the path flown was pretty wonky so I updated the paramaters as follows. 
+	- kpPosXY = 3
+	- kpPosZ = 2
+  	- kpVelXY = 9
+	- kpBank = 12
+	- kpYaw = 9
   
 ## References
 
