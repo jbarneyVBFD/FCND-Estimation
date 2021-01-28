@@ -122,6 +122,121 @@ float Yaw() const
   }
   ```
   
+  ### Step 3
+  
+- For the PredictState function, I started by creating a V3F named aI and using the given quaternion of the estimated attitude, I used its class function, Rotate_BtoI, to rotate the input accelerometer reading from the body frame into the world (or inertial) frame. 
+  ```cpp
+  Quaternion<float> attitude = Quaternion<float>::FromEuler123_RPY(rollEst, pitchEst, curState(6));
+  V3F aI = attitude.Rotate_BtoI(accel);
+  ```
+  ```cpp
+  V3F Rotate_BtoI(const V3F& in) const
+	{
+		float R[9];
+		RotationMatrix_IwrtB(R);
+
+		V3F ret(R[0]*in[0] + R[1]*in[1] + R[2]*in[2],
+			      R[3]*in[0] + R[4]*in[1] + R[5]*in[2],
+						R[6]*in[0] + R[7]*in[1] + R[8]*in[2]);
+
+		return ret;
+	}
+  ```
+- As you can see above the Rotate_BtoI function first creates a rotation matrix with another class function, RotationMatrix_IwrtB. It then multiplys the V3F input, here the accelerometer readings, by the newly created rotation matrix. Equation 127 from Diebel [1], represents the code above, with Rq(q) being the rotation matrix (equation 125 in Diebel [1]), z' being the vector in the body frame, and of course z being the vector in the world frame.
+  
+  <a href="https://www.codecogs.com/eqnedit.php?latex=z&space;=&space;R_q(r)^T\acute{z}" target="_blank"><img src="https://latex.codecogs.com/gif.latex?z&space;=&space;R_q(r)^T\acute{z}" title="z = R_q(r)^T\acute{z}" /></a>
+  
+- Due to the very short time step, I implemented a very simple integration method, by multiplying the current state's velocities by the time step and adding it to the positions. Then multiplying the accelerations, already rotated to the world frame, by the time step and adding them to the velocities. For the velocity in the z axis, I also subtracted the CONST_GRAVITY multplied by the time step.
+
+```cpp
+  predictedState(0) += predictedState(3)*dt;
+  predictedState(1) += predictedState(4)*dt;
+  predictedState(2) += predictedState(5)*dt;
+  predictedState(3) += aI.x*dt;
+  predictedState(4) += aI.y*dt;
+  predictedState(5) += - CONST_GRAVITY*dt + aI.z*dt;
+```
+
+- The above method is best described from equation 49, from Tellex's estimation paper [2]. With <a href="https://www.codecogs.com/eqnedit.php?latex=\inline&space;u_t&space;\Delta&space;t" target="_blank"><img src="https://latex.codecogs.com/gif.latex?\inline&space;u_t&space;\Delta&space;t" title="u_t \Delta t" /></a>
+as the input accelerations, having already been rotated to the world frame above. With psi remaining the same, there was no need to include it in these calculations.
+
+<a href="https://www.codecogs.com/eqnedit.php?latex=g(x_t,&space;u_t,&space;\Delta&space;t)&space;=&space;\begin{bmatrix}&space;x_{t,x}&space;&plus;&space;x_{t,\dot{x}}\Delta&space;t\\&space;x_{t,y}&space;&plus;&space;x_{t,\dot{y}}\Delta&space;t&space;\\&space;x_{t,z}&space;&plus;&space;x_{t,\dot{z}}\Delta&space;t&space;\\&space;x_{t,\dot{x}}\\&space;x_{t,\dot{y}}&space;\\&space;x_{t,\dot{z}}&space;\\&space;x_{t,&space;\Psi&space;}&space;\end{bmatrix}&space;&plus;&space;\begin{bmatrix}&space;0&space;&&space;0&space;&&space;0&space;&&space;0\\&space;0&space;&&space;0&space;&&space;0&space;&&space;0\\&space;0&space;&&space;0&space;&&space;0&space;&&space;0\\&space;R_{bg}[0:]&space;&&space;&&space;&&space;0\\&space;R_{bg}[1:]&space;&&space;&&space;&&space;0\\&space;R_{bg}[2:]&space;&&space;&&space;&&space;0\\&space;0&space;&&space;0&space;&&space;0&space;&&space;1&space;\end{bmatrix}&space;u_t&space;\Delta&space;t" target="_blank"><img src="https://latex.codecogs.com/gif.latex?g(x_t,&space;u_t,&space;\Delta&space;t)&space;=&space;\begin{bmatrix}&space;x_{t,x}&space;&plus;&space;x_{t,\dot{x}}\Delta&space;t\\&space;x_{t,y}&space;&plus;&space;x_{t,\dot{y}}\Delta&space;t&space;\\&space;x_{t,z}&space;&plus;&space;x_{t,\dot{z}}\Delta&space;t&space;\\&space;x_{t,\dot{x}}\\&space;x_{t,\dot{y}}&space;\\&space;x_{t,\dot{z}}&space;\\&space;x_{t,&space;\Psi&space;}&space;\end{bmatrix}&space;&plus;&space;\begin{bmatrix}&space;0&space;&&space;0&space;&&space;0&space;&&space;0\\&space;0&space;&&space;0&space;&&space;0&space;&&space;0\\&space;0&space;&&space;0&space;&&space;0&space;&&space;0\\&space;R_{bg}[0:]&space;&&space;&&space;&&space;0\\&space;R_{bg}[1:]&space;&&space;&&space;&&space;0\\&space;R_{bg}[2:]&space;&&space;&&space;&&space;0\\&space;0&space;&&space;0&space;&&space;0&space;&&space;1&space;\end{bmatrix}&space;u_t&space;\Delta&space;t" title="g(x_t, u_t, \Delta t) = \begin{bmatrix} x_{t,x} + x_{t,\dot{x}}\Delta t\\ x_{t,y} + x_{t,\dot{y}}\Delta t \\ x_{t,z} + x_{t,\dot{z}}\Delta t \\ x_{t,\dot{x}}\\ x_{t,\dot{y}} \\ x_{t,\dot{z}} \\ x_{t, \Psi } \end{bmatrix} + \begin{bmatrix} 0 & 0 & 0 & 0\\ 0 & 0 & 0 & 0\\ 0 & 0 & 0 & 0\\ R_{bg}[0:] & & & 0\\ R_{bg}[1:] & & & 0\\ R_{bg}[2:] & & & 0\\ 0 & 0 & 0 & 1 \end{bmatrix} u_t \Delta t" /></a>
+
+
+
+
+- Moving onto the function GetRbgPrime, I first created phi, theta, and psi variables, with roll, pitch, and yaw passed into them to make it easier to copy equation 71 from Diebel [1]. I then used the comma initializer from Eigen and passed in all the coeffefficients from Diebels equation.
+
+```cpp
+float phi = roll;
+  float theta = pitch;
+  float psi = yaw;
+
+  RbgPrime << -cos(theta)*sin(psi), -sin(phi)*sin(theta)*sin(psi) - cos(phi)*cos(psi), -cos(phi)*sin(theta)*sin(psi) + sin(phi)*cos(psi),
+              cos(theta)*cos(psi), sin(phi)*sin(theta)*cos(psi) - cos(phi)*sin(psi), cos(phi)*sin(theta)*cos(psi) + sin(phi)*sin(psi),
+              0.0, 0.0, 0.0;
+```
+
+For the Predict function I first initialized ut as a MatrixXf from Eigen, and used the comma initializer to pass in the accelerometer's readings. I again used the comma initializer to pass in the jacobian of the above <a href="https://www.codecogs.com/eqnedit.php?latex=\inline&space;g(x_t,&space;u_t,&space;\Delta_t)" target="_blank"><img src="https://latex.codecogs.com/gif.latex?\inline&space;g(x_t,&space;u_t,&space;\Delta_t)" title="g(x_t, u_t, \Delta_t)" /></a> as defined in equation 51 from Tellex's estimation paper [2]. From there I followed the extended kalman filter algorithm on page 3 of Tellex's estimation paper [2], written below, to compute the predicted state variance.
+
+
+
+<a href="https://www.codecogs.com/eqnedit.php?latex=\bar{\Sigma}&space;=&space;G_t&space;\Sigma_{t-1}G_{t}^{T}&space;&plus;&space;Q_t" target="_blank"><img src="https://latex.codecogs.com/gif.latex?\bar{\Sigma}&space;=&space;G_t&space;\Sigma_{t-1}G_{t}^{T}&space;&plus;&space;Q_t" title="\bar{\Sigma} = G_t \Sigma_{t-1}G_{t}^{T} + Q_t" /></a>
+
+
+
+In code as follows:
+
+```cpp
+MatrixXf ut(3, 1);
+
+  ut << accel.x,
+        accel.y,
+        accel.z;
+
+
+
+  gPrime << 1.0, 0.0, 0.0, dt, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0, dt, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0, 0.0, dt, 0.0,
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, (RbgPrime.row(0) * ut) * dt,
+            0.0, 0.0, 0.0, 0.0, 1.0, 0.0, (RbgPrime.row(1) * ut) * dt,
+            0.0, 0.0, 0.0, 0.0, 0.0, 1.0, (RbgPrime.row(2) * ut) * dt,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0;
+
+
+
+  ekfCov << gPrime * ekfCov * gPrime.transpose() + Q;
+  ```
+
+- I then tuned QPosXYStd and QVelXYStd in the QuadEstimatorEKF.txt file as .05 and .1.
+
+### Step 4
+
+- For the UpdateFromMag function I first used the comma initializer from the Eigen library to pass in the values for hPrime as it is in equation 58 from Tellex's estimation paper [2]. I then passed in the current estimated yaw to the zFromX vector. Then I created the float y, to pass in the difference of the measured and estimated yaw. From there I normalised the difference to keep the movements as short as possible. This was normalised by preventing the difference from being greater than pi radians (180 degrees). If it were found to be greater than pi radians (180 degrees), 2 pi was added to the estimated yaw, sending it in the opposite (counter-clockwise) direction. Conversely if the difference was found to be less than -pi (-180 degrees), then 2 pi was subtracted from the estimated yaw, again sending it in the opposite (clockwise) direction.   
+
+```cpp
+hPrime << 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0;
+  zFromX << ekfState(6);
+
+  float y = magYaw - ekfState(6);
+  if (y > F_PI){
+      zFromX(0) += 2.0 * F_PI;
+  }
+  else if (y < -F_PI){
+      zFromX(0) -= 2.0 * F_PI;
+  }
+  ```
+  
+  ### Step 5
+  
+  
+  
+  
+
+  
 ## References
 
 [1] James Diebel.  Representing attitude:  Euler angles, unit quaternions, and rotation vectors.Matrix, 58(15-16):1–35, 2006.
+
+[2] Stefanie Tellex, Andy Brown, and Sergei Lupashin. Estimation for Quadrotors, January 27, 2021.
